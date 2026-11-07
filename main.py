@@ -1,7 +1,12 @@
 import asyncio
 import logging
 import sys
+import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+base = os.path.join(BASE_DIR, "data")
+
+os.makedirs(base, exist_ok=True)
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode

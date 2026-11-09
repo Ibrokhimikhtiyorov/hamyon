@@ -1,0 +1,41 @@
+HAMYONAPI INTEGRATSIYASI — O'RNATISH
+====================================
+
+1) ZIP ichidagi loyiha fayllarini GitHub/Render ishlatayotgan loyihangizga joylang.
+   Eski .env va data/ papkasini o'chirmang yoki almashtirmang.
+   Bu arxivga .env, data/, .git/ va .venv/ ataylab qo'shilmagan.
+
+2) Render -> tolovbot -> Environment bo'limida quyidagilar bo'lishi kerak:
+   HAMYON_SHOP_ID=HamyonAPI bergan Shop ID
+   HAMYON_SHOP_KEY=HamyonAPI bergan Shop Key
+   HAMYON_API_BASE=https://hamyon-api.uz
+   HAMYON_TIMEOUT=15
+
+   BOT_TOKEN va boshqa mavjud sozlamalaringizni ham saqlang.
+   Shop Key'ni hech kimga yubormang.
+
+3) Kodni GitHub'ga push qiling va Render deploy tugashini kuting.
+   Health tekshiruvi: https://tolovbot.onrender.com/health
+
+4) HamyonAPI do'kon sozlamalarida callback manzillarini kiriting:
+   Prepare URL:  https://tolovbot.onrender.com/hamyon/prepare
+   Complete URL: https://tolovbot.onrender.com/hamyon/complete
+
+5) Telegram botda Hamyonim -> Balansni to'ldirish bo'limini oching.
+   Summani kiriting va "HamyonAPI orqali avtomatik to'lash" ni tanlang.
+   Dastlab kichik summa bilan haqiqiy test qiling.
+
+TO'LOV XAVFSIZLIGI
+------------------
+- Callback imzosi HamyonAPI namunasi bo'yicha tekshiriladi.
+- To'lov ID bazada UNIQUE saqlanadi.
+- Takroriy paid callback balansni ikkinchi marta to'ldirmaydi.
+- Eski karta-chek + admin tasdig'i yo'li ham saqlangan.
+- Brauzerga qaytishning o'zi balansni to'ldirmaydi; faqat imzosi tekshirilgan
+  HamyonAPI complete callback hisobga olinadi.
+
+XAVFSIZLIK
+----------
+- .env, SHOP_KEY, BOT_TOKEN, data/ va .git/ fayllarini ommaga yubormang.
+- ZIP ichidagi eski token ochilib qolgan bo'lishi mumkin: BotFather'da tokenni
+  yangilang va Render BOT_TOKEN qiymatini ham almashtiring.

@@ -9,7 +9,6 @@ class AccountAdd(StatesGroup):
     login = State()
     password = State()
     price = State()
-    confirm = State()
 
 
 class SellerSearch(StatesGroup):

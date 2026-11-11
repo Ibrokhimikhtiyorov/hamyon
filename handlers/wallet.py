@@ -7,7 +7,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 import services
-from config import COMMISSION_PERCENT, MIN_TOPUP, PAYMENT_CARD, PAYMENT_HOLDER
+from config import (
+    COMMISSION_PERCENT,
+    MIN_TOPUP,
+    PAYMENT_CARD,
+    PAYMENT_HOLDER,
+    PAYMENT_MINUTES,
+)
 from keyboards import (
     back_to_menu, cancel_kb, topup_payment_method_kb, topup_review_kb, wallet_menu,
 )
@@ -108,9 +114,9 @@ async def cb_pay_hamyon(callback: CallbackQuery, state: FSMContext, db_user):
 
     await callback.answer("To'lov yaratilmoqda...")
     order_id = f"u{db_user['id']}-{uuid.uuid4().hex}"
+    expires_at = await services.create_hamyon_payment(db_user["id"], amount, order_id)
     await state.clear()
     try:
-        await services.create_hamyon_payment(db_user["id"], amount, order_id)
         result = await hamyon.create_payment(order_id, amount)
     except Exception:
         logger.exception("HamyonAPI orqali to'lov yaratilmadi")
@@ -124,22 +130,25 @@ async def cb_pay_hamyon(callback: CallbackQuery, state: FSMContext, db_user):
 
     payment_id = str(result.get("payment_id"))
     card = result.get("card")
-    expires_in = result.get("expires_in")
     lines = [
         "⚡ <b>HamyonAPI to'lovi yaratildi</b>",
         "",
         f"💰 Summa: <b>{fmt_sum(amount)}</b>",
-        f"🧾 To'lov ID: <code>{esc(payment_id)}</code>",
+        f"🧾 To'lov ID: {code(payment_id)}",
     ]
     if card:
-        lines.append(f"💳 Karta: <code>{esc(card)}</code>")
-    if expires_in is not None:
-        lines.append(f"⏳ Amal qilish muddati: {esc(expires_in)} soniya")
-    lines.extend([
-        "",
-        "Ko'rsatilgan karta orqali aynan shu summani to'lang.",
-        "To'lov tasdiqlangach balansingiz avtomatik to'ldiriladi. Chek yuborish shart emas.",
-    ])
+        lines.append(f"💳 Karta: {code(card)}")
+    lines.extend(
+        [
+            f"⏳ To'lov uchun vaqt: <b>{PAYMENT_MINUTES} daqiqa</b> "
+            f"({fmt_dt(expires_at)} gacha)",
+            "",
+            "Ko'rsatilgan karta orqali aynan shu summani to'lang.",
+            "To'lov tasdiqlangach balansingiz avtomatik to'ldiriladi. "
+            "Chek yuborish shart emas.",
+            "⚠️ Vaqt tugasa to'lov avtomatik bekor qilinadi.",
+        ]
+    )
     await callback.message.answer("\n".join(lines), reply_markup=back_to_menu())
 
 

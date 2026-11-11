@@ -8,6 +8,7 @@ from config import (
     AUTO_COMPLETE_MINUTES,
     CHECK_MINUTES,
     COMMISSION_PERCENT,
+    PAYMENT_MINUTES,
     PENALTY_INTERVAL_MINUTES,
     PENALTY_PERCENT,
     SUPPORT_USERNAME,
@@ -90,17 +91,19 @@ async def cb_rules(callback: CallbackQuery, state: FSMContext, db_user):
         f"🎮 Platformada {GAME_ACCOUNT_EXAMPLES}ni sotish mumkin.\n\n"
         f"1. Har bir muvaffaqiyatli savdodan bot <b>{COMMISSION_PERCENT}%</b> komissiya oladi, "
         f"sotuvchiga <b>{100 - COMMISSION_PERCENT}%</b> o'tkaziladi.\n\n"
-        f"2. Xaridor to'lovni amalga oshirgach, akkaunt login-paroli ochiladi va "
-        f"tekshirish uchun <b>{CHECK_MINUTES} daqiqa</b> vaqt beriladi.\n\n"
-        f"3. {CHECK_MINUTES} daqiqadan oshgach, har bir {PENALTY_INTERVAL_MINUTES} daqiqa "
+        f"2. To'lov yaratilgach, to'lovni yakunlash uchun <b>{PAYMENT_MINUTES} daqiqa</b> "
+        "vaqt beriladi. Vaqt tugasa to'lov avtomatik bekor qilinadi.\n\n"
+        f"3. To'lov qilingach, akkaunt login-paroli ochiladi va tekshirish uchun "
+        f"<b>{CHECK_MINUTES} daqiqa</b> vaqt beriladi.\n\n"
+        f"4. {CHECK_MINUTES} daqiqadan oshgach, har bir {PENALTY_INTERVAL_MINUTES} daqiqa "
         f"kechikish uchun akkaunt narxining <b>{PENALTY_PERCENT}%</b> miqdorida jarima "
         "avtomatik hisoblanadi.\n\n"
-        f"4. Tekshirish muddati tugagach yana {AUTO_COMPLETE_MINUTES} daqiqa ichida "
+        f"5. Tekshirish muddati tugagach yana {AUTO_COMPLETE_MINUTES} daqiqa ichida "
         "tasdiqlanmasa, buyurtma avtomatik yakunlanadi.\n\n"
-        "5. Login va parollar shifrlangan holda saqlanadi va faqat xaridorga ko'rsatiladi.\n\n"
-        "6. Nizoli holatlar admin tomonidan ko'rib chiqiladi. Firibgarlik aniqlansa, "
+        "6. Login va parollar shifrlangan holda saqlanadi va faqat xaridorga ko'rsatiladi.\n\n"
+        "7. Nizoli holatlar admin tomonidan ko'rib chiqiladi. Firibgarlik aniqlansa, "
         "hisob bloklanadi.\n\n"
-        "7. Platforma akkauntlarning qonuniyligi uchun javobgar emas. Faqat o'zingizga "
+        "8. Platforma akkauntlarning qonuniyligi uchun javobgar emas. Faqat o'zingizga "
         "tegishli akkauntlarni soting."
     )
     await callback.message.answer(text, reply_markup=back_to_menu())

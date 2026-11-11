@@ -92,8 +92,10 @@ CREATE TABLE IF NOT EXISTS hamyon_payments (
     payment_id TEXT UNIQUE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     amount INTEGER NOT NULL CHECK(amount > 0),
+    purpose TEXT NOT NULL DEFAULT 'topup',
     card TEXT,
     expires_in INTEGER,
+    expires_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -146,6 +148,10 @@ async def _ensure_columns(conn: aiosqlite.Connection) -> None:
         "orders": {
             "reminder_5_sent": "INTEGER NOT NULL DEFAULT 0",
             "reminder_1_sent": "INTEGER NOT NULL DEFAULT 0",
+        },
+        "hamyon_payments": {
+            "purpose": "TEXT NOT NULL DEFAULT 'topup'",
+            "expires_at": "TEXT",
         },
     }
     for table, columns in migrations.items():

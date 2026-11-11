@@ -9,13 +9,19 @@ from typing import Any
 from aiohttp import ClientSession, ClientTimeout, web
 
 from config import (
+    CHECK_MINUTES,
     HAMYON_API_BASE,
     HAMYON_SHOP_ID,
     HAMYON_SHOP_KEY,
     HAMYON_TIMEOUT,
+    PENALTY_INTERVAL_MINUTES,
+    PENALTY_PERCENT,
+    SELLER_SHARE_PERCENT,
 )
 import services
-from utils import esc, fmt_sum
+from keyboards import order_actions
+from notifications import notify_admin_payment_received, notify_admin_purchase
+from utils import code, fmt_dt, fmt_sum
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +123,66 @@ async def hamyon_prepare(request: web.Request) -> web.Response:
     return web.json_response({"result": "ok"})
 
 
+async def _finish_purchase(bot, payment: dict, account_id: int) -> bool:
+    """To'g'ridan-to'g'ri to'lovdan keyin xaridni avtomatik yakunlaydi.
+
+    Akkaunt allaqachon sotilgan bo'lsa False qaytaradi — mablag' balansda qoladi.
+    """
+    buyer = await services.get_user_by_tg(payment["user_tg"])
+    if buyer is None:
+        return False
+    try:
+        order, account, seller = await services.create_order(buyer["id"], account_id)
+        login, password = await services.get_credentials(order["id"], buyer["id"])
+    except services.ServiceError:
+        return False
+
+    try:
+        await bot.send_message(
+            payment["user_tg"],
+            "✅ <b>To'lov qabul qilindi — xarid muvaffaqiyatli!</b>\n\n"
+            f"📦 Akkaunt: <b>#{account['id']}</b>\n"
+            f"🔑 Login: {code(login)}\n"
+            f"🔒 Parol: {code(password)}\n\n"
+            f"💰 To'langan: <b>{fmt_sum(account['price'])}</b>\n"
+            f"⏰ Tekshirish muddati: <b>{fmt_dt(order['check_deadline'])}</b> gacha "
+            f"({CHECK_MINUTES} daqiqa)\n\n"
+            f"⚠️ Muddat tugagach har bir {PENALTY_INTERVAL_MINUTES} daqiqa kechikish "
+            f"uchun narxning {PENALTY_PERCENT}% jarima hisoblanadi.\n"
+            "Akkauntni tekshirib, natijaga ko'ra tasdiqlang yoki shikoyat qiling.",
+            reply_markup=order_actions(order["id"]),
+            protect_content=True,
+        )
+    except Exception:
+        logger.exception("Xarid xabari xaridorga yuborilmadi")
+
+    try:
+        await bot.send_message(
+            seller["tg_id"],
+            "🎉 <b>Akkauntingiz sotildi!</b>\n\n"
+            f"📦 Akkaunt: <b>#{account['id']}</b>\n"
+            f"💰 Narx: <b>{fmt_sum(account['price'])}</b>\n"
+            f"🆔 Buyurtma: <b>#{order['id']}</b>\n\n"
+            f"Xaridor akkauntni tekshirib tasdiqlagach, mablag'ning "
+            f"{SELLER_SHARE_PERCENT}% balansingizga qo'shiladi.",
+        )
+    except Exception:
+        pass
+
+    await notify_admin_purchase(
+        bot,
+        buyer_name=payment["user_name"],
+        buyer_tg=payment["user_tg"],
+        account_id=account["id"],
+        price=account["price"],
+        order_id=order["id"],
+        seller_name=seller["full_name"],
+        seller_code=seller["seller_code"],
+        method="HamyonAPI (to'g'ridan-to'g'ri)",
+    )
+    return True
+
+
 async def hamyon_complete(request: web.Request) -> web.Response:
     form = await request.post()
     if not _signature_is_valid(form):
@@ -149,18 +215,66 @@ async def hamyon_complete(request: web.Request) -> web.Response:
     if payment is None:
         return web.json_response({"error": "payment_not_found_or_amount_mismatch"}, status=404)
 
-    if payment["credited"]:
-        bot = request.app.get("bot")
-        if bot is not None:
-            try:
-                await bot.send_message(
-                    payment["user_tg"],
-                    "✅ <b>To'lov muvaffaqiyatli tasdiqlandi!</b>\n\n"
-                    f"💰 To'ldirilgan summa: <b>{fmt_sum(payment['amount'])}</b>\n"
-                    f"👛 Yangi balans: <b>{fmt_sum(payment['balance'])}</b>",
-                )
-            except Exception:
-                # Telegram xabari yuborilmasa ham to'lov tasdiqlangan bo'ladi.
-                logger.exception("To'lov xabari foydalanuvchiga yuborilmadi")
+    if not payment["credited"]:
+        return web.json_response({"result": "ok"})
+
+    bot = request.app.get("bot")
+    if bot is None:
+        return web.json_response({"result": "ok"})
+
+    purpose = str(payment.get("purpose") or "topup")
+    purchase_account_id = 0
+    if purpose.startswith("buy:"):
+        try:
+            purchase_account_id = int(purpose.split(":", 1)[1])
+        except (TypeError, ValueError):
+            purchase_account_id = 0
+
+    purchased = False
+    if purchase_account_id:
+        purchased = await _finish_purchase(bot, payment, purchase_account_id)
+
+    if purchased:
+        return web.json_response({"result": "ok"})
+
+    try:
+        if purchase_account_id:
+            await bot.send_message(
+                payment["user_tg"],
+                "✅ <b>To'lov qabul qilindi</b>\n\n"
+                "ℹ️ Akkaunt buyurtma vaqtida allaqachon sotilib ulgurgan.\n"
+                f"💰 Mablag' balansingizga o'tdi: <b>{fmt_sum(payment['amount'])}</b>\n"
+                f"👛 Yangi balans: <b>{fmt_sum(payment['balance'])}</b>\n\n"
+                "Sotuvchi kodini qayta terib, boshqa akkaunt tanlang.",
+            )
+        else:
+            await bot.send_message(
+                payment["user_tg"],
+                "✅ <b>To'lov muvaffaqiyatli tasdiqlandi!</b>\n\n"
+                f"💰 To'ldirilgan summa: <b>{fmt_sum(payment['amount'])}</b>\n"
+                f"👛 Yangi balans: <b>{fmt_sum(payment['balance'])}</b>",
+            )
+    except Exception:
+        # Telegram xabari yuborilmasa ham to'lov tasdiqlangan bo'ladi.
+        logger.exception("To'lov xabari foydalanuvchiga yuborilmadi")
+
+    note = (
+        "Akkaunt xaridi uchun (balansga o'tdi)"
+        if purchase_account_id
+        else "Balans to'ldirish (HamyonAPI)"
+    )
+    try:
+        await notify_admin_payment_received(
+            bot,
+            user_name=payment["user_name"],
+            username=payment["username"],
+            user_tg=payment["user_tg"],
+            amount=payment["amount"],
+            payment_id=payment["payment_id"],
+            balance=payment["balance"],
+            note=note,
+        )
+    except Exception:
+        logger.exception("Admin SMS yuborilmadi")
 
     return web.json_response({"result": "ok"})

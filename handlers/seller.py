@@ -6,7 +6,6 @@ import crypto
 import services
 from config import MIN_PRICE, MIN_WITHDRAW
 from keyboards import (
-    account_confirm,
     back_to_menu,
     cancel_kb,
     phone_keyboard,
@@ -179,61 +178,29 @@ async def account_price(message: Message, state: FSMContext):
         return
     try:
         login = crypto.decrypt(data["login_enc"])
+        password = crypto.decrypt(data["password_enc"])
     except ValueError:
         await state.clear()
         await message.answer("❌ Ma'lumotlar eskirgan. Qaytadan boshlang.", reply_markup=back_to_menu())
         return
 
-    await state.update_data(price=price)
-    await state.set_state(AccountAdd.confirm)
-    await message.answer(
-        "4️⃣ <b>Ma'lumotlarni tekshiring</b>\n\n"
-        f"🔑 Login: {code(login)}\n"
-        "🔒 Parol: <code>••••••</code>\n"
-        f"💰 Narx: <b>{fmt_sum(price)}</b>\n\n"
-        "Akkaunt ishlayotganini va unda muammo yo'qligini tasdiqlaysizmi?\n"
-        "⚠️ Yolg'on ma'lumot uchun hisob bloklanadi.",
-        reply_markup=account_confirm(price),
-    )
-
-
-@router.callback_query(F.data == "seller:addconfirm:yes")
-async def account_confirm_save(callback: CallbackQuery, state: FSMContext, db_user):
-    data = await state.get_data()
-    if not all(k in data for k in ("login_enc", "password_enc", "price")):
-        await state.clear()
-        await callback.answer("Ma'lumotlar eskirgan", show_alert=True)
-        return
-
-    try:
-        login = crypto.decrypt(data["login_enc"])
-        password = crypto.decrypt(data["password_enc"])
-    except ValueError:
-        await state.clear()
-        await callback.answer("Ma'lumotlar eskirgan. Qaytadan boshlang", show_alert=True)
-        return
-
     try:
         account_id = await services.create_account(
-            db_user["id"], login, password, int(data["price"])
+            db_user["id"], login, password, price
         )
     except services.ServiceError as exc:
-        await callback.answer(str(exc), show_alert=True)
+        await state.clear()
+        await message.answer(f"❌ {esc(exc)}", reply_markup=back_to_menu())
         return
 
     await state.clear()
-    await callback.answer("Akkaunt qo'shildi")
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-    await callback.message.answer(
-        "✅ <b>Akkaunt muvaffaqiyatli qo'shildi!</b>\n\n"
+    await message.answer(
+        "✅ <b>E'lon joylandi!</b>\n\n"
         f"Akkaunt ID: {code(account_id)}\n"
-        f"Narx: <b>{fmt_sum(int(data['price']))}</b>\n\n"
-        "Endi u xaridorlarga ko'rinadi.",
+        f"Narx: <b>{fmt_sum(price)}</b>\n\n"
+        "E'lon darhol xaridorlarga ko'rinadi.",
     )
-    await show_seller_menu(callback.message, db_user)
+    await show_seller_menu(message, db_user)
 
 
 @router.callback_query(F.data == "seller:accounts")
@@ -533,8 +500,3 @@ async def withdraw_card(message: Message, state: FSMContext, db_user):
             message.bot, withdrawal, withdrawal_review_kb(withdrawal_id)
         )
     await show_seller_menu(message, db_user)
-
-
-@router.message(AccountAdd.confirm)
-async def account_confirm_wrong(message: Message):
-    await message.answer("Iltimos, «Ha, akkaunt ishlaydi» yoki «Bekor qilish» tugmasini bosing.")

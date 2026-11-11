@@ -1,3 +1,6 @@
+import logging
+import uuid
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -7,10 +10,12 @@ from aiogram.types import (
     Message,
 )
 
+import hamyon
 import services
 from config import (
     CHECK_MINUTES,
     COMMISSION_PERCENT,
+    PAYMENT_MINUTES,
     PENALTY_INTERVAL_MINUTES,
     PENALTY_PERCENT,
     SELLER_SHARE_PERCENT,
@@ -24,7 +29,7 @@ from keyboards import (
     order_actions,
     order_detail_kb,
 )
-from notifications import notify_admin_dispute
+from notifications import notify_admin_dispute, notify_admin_purchase
 from states import DisputeFlow, SellerSearch
 from utils import (
     ORDER_STATUS_LABELS,
@@ -37,6 +42,7 @@ from utils import (
 )
 
 router = Router(name="buyer")
+logger = logging.getLogger(__name__)
 
 
 @router.callback_query(F.data == "buyer:search")
@@ -105,12 +111,74 @@ async def cb_shop_account(callback: CallbackQuery, state: FSMContext, db_user):
         f"📦 <b>Akkaunt #{account['id']}</b>\n\n"
         f"👤 Sotuvchi: {esc(seller['full_name'])}\n"
         f"🔑 Sotuvchi kodi: {code(seller['seller_code'])}\n"
-        f"💰 Narx: <b>{fmt_sum(account['price'])}</b>\n\n"
-        "To'lov hamyoningizdan yechiladi. To'lovdan so'ng login-parol ochiladi va "
-        f"tekshirish uchun {CHECK_MINUTES} daqiqa vaqt beriladi.\n\n"
-        f"💳 Balansingiz: <b>{fmt_sum(buyer['balance'])}</b>",
+        f"💰 Narx: <b>{fmt_sum(account['price'])}</b>\n"
+        f"💳 Balansingiz: <b>{fmt_sum(buyer['balance'])}</b>\n\n"
+        "To'lovni balansdan yoki «⚡ To'g'ridan-to'g'ri to'lash» tugmasi orqali "
+        f"amalga oshirishingiz mumkin. To'lov uchun <b>{PAYMENT_MINUTES} daqiqa</b> "
+        "vaqt beriladi.\n"
+        f"To'lovdan so'ng login-parol ochiladi va tekshirish uchun "
+        f"<b>{CHECK_MINUTES} daqiqa</b> vaqt beriladi.",
         reply_markup=account_offer_kb(account["id"], buyer["balance"], account["price"]),
     )
+
+
+@router.callback_query(F.data.startswith("shop:pay:"))
+async def cb_direct_pay(callback: CallbackQuery, state: FSMContext, db_user):
+    await state.clear()
+    try:
+        account_id = int(callback.data.split(":")[2])
+    except (ValueError, IndexError):
+        await callback.answer("Noto'g'ri ma'lumot", show_alert=True)
+        return
+
+    account = await services.get_account(account_id)
+    if account is None or account["status"] != "active":
+        await callback.answer("Bu akkaunt allaqachon sotilgan", show_alert=True)
+        return
+    if account["seller_id"] == db_user["id"]:
+        await callback.answer("O'z akkauntingizni sotib ola olmaysiz", show_alert=True)
+        return
+
+    await callback.answer("To'lov yaratilmoqda...")
+    order_ref = f"buy{account_id}-{uuid.uuid4().hex}"
+    expires_at = await services.create_hamyon_payment(
+        db_user["id"], account["price"], order_ref, purpose=f"buy:{account_id}"
+    )
+    try:
+        result = await hamyon.create_payment(order_ref, account["price"])
+    except Exception:
+        logger.exception("To'g'ridan-to'g'ri to'lov yaratilmadi")
+        await services.fail_hamyon_payment(order_ref)
+        await callback.message.answer(
+            "❌ Hozircha avtomatik to'lov yaratilmadi. Keyinroq urinib ko'ring "
+            "yoki balansni to'ldirib, balansdan sotib oling.",
+            reply_markup=back_to_menu(),
+        )
+        return
+
+    payment_id = str(result.get("payment_id"))
+    card = result.get("card")
+    lines = [
+        "⚡ <b>To'lov yaratildi</b>",
+        "",
+        f"📦 Akkaunt: <b>#{account_id}</b>",
+        f"💰 To'lov summasi: <b>{fmt_sum(account['price'])}</b>",
+        f"🧾 To'lov ID: {code(payment_id)}",
+    ]
+    if card:
+        lines.append(f"💳 Karta: {code(card)}")
+    lines.extend(
+        [
+            f"⏳ To'lov uchun vaqt: <b>{PAYMENT_MINUTES} daqiqa</b> "
+            f"({fmt_dt(expires_at)} gacha)",
+            "",
+            "Ko'rsatilgan kartaga aynan shu summani o'tkazing.",
+            "To'lov tushishi bilan akkaunt login-paroli ochiladi va "
+            f"{CHECK_MINUTES} daqiqa tekshirish vaqti boshlanadi.",
+            "⚠️ Vaqt tugasa to'lov avtomatik bekor qilinadi.",
+        ]
+    )
+    await callback.message.answer("\n".join(lines), reply_markup=cancel_kb())
 
 
 @router.callback_query(F.data.startswith("shop:confirm:"))
@@ -229,6 +297,18 @@ async def cb_buy(callback: CallbackQuery, state: FSMContext, db_user):
         )
     except Exception:
         pass
+
+    await notify_admin_purchase(
+        callback.bot,
+        buyer_name=db_user["full_name"],
+        buyer_tg=db_user["tg_id"],
+        account_id=account["id"],
+        price=account["price"],
+        order_id=order["id"],
+        seller_name=seller["full_name"],
+        seller_code=seller["seller_code"],
+        method="Balansdan",
+    )
 
 
 @router.callback_query(F.data.startswith("order:confirm:"))

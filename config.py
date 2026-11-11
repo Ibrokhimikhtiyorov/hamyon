@@ -35,11 +35,12 @@ def _int_list(raw: str) -> list[int]:
 
 
 ADMIN_IDS = _int_list(os.getenv("ADMIN_IDS", ""))
-PAYMENT_CARD = os.getenv("PAYMENT_CARD", "8600 0000 0000 0000").strip()
-PAYMENT_HOLDER = os.getenv("PAYMENT_HOLDER", "Marketplace Admin").strip()
+PAYMENT_CARD = os.getenv("PAYMENT_CARD", "5614 6822 1285 8205").strip()
+PAYMENT_HOLDER = os.getenv("PAYMENT_HOLDER", "Ibrohim Ixtiyorov").strip()
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "").strip().lstrip("@")
 
 COMMISSION_PERCENT = int(os.getenv("COMMISSION_PERCENT", "15"))
+PAYMENT_MINUTES = int(os.getenv("PAYMENT_MINUTES", "5"))
 CHECK_MINUTES = int(os.getenv("CHECK_MINUTES", "10"))
 PENALTY_PERCENT = int(os.getenv("PENALTY_PERCENT", "10"))
 PENALTY_INTERVAL_MINUTES = int(os.getenv("PENALTY_INTERVAL_MINUTES", "10"))
@@ -52,7 +53,7 @@ SELLER_SHARE_PERCENT = 100 - COMMISSION_PERCENT
 
 if not 0 <= COMMISSION_PERCENT < 100:
     raise ValueError("COMMISSION_PERCENT 0 va 99 oralig'ida bo'lishi kerak")
-if CHECK_MINUTES <= 0 or PENALTY_INTERVAL_MINUTES <= 0 or AUTO_COMPLETE_MINUTES < 0:
+if PAYMENT_MINUTES <= 0 or CHECK_MINUTES <= 0 or PENALTY_INTERVAL_MINUTES <= 0 or AUTO_COMPLETE_MINUTES < 0:
     raise ValueError("Vaqt sozlamalari noto'g'ri")
 if not 0 <= PENALTY_PERCENT <= 100:
     raise ValueError("PENALTY_PERCENT noto'g'ri")

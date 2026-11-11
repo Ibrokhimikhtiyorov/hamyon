@@ -11,12 +11,14 @@ from config import (
     CHECK_MINUTES,
     COMMISSION_PERCENT,
     MIN_PRICE,
+    PAYMENT_MINUTES,
     PENALTY_INTERVAL_MINUTES,
     PENALTY_PERCENT,
     SELLER_SHARE_PERCENT,
 )
 from db import db
 from utils import (
+    deadline_after,
     fmt_dt,
     fmt_sum,
     generate_code,
@@ -794,14 +796,43 @@ async def list_user_withdrawals(user_id: int, limit: int = 10):
     )
 
 
-async def create_hamyon_payment(user_id: int, amount: int, order_id: str):
+async def create_hamyon_payment(
+    user_id: int, amount: int, order_id: str, purpose: str = "topup"
+) -> str:
+    """Yangi to'lov yaratadi va 5 daqiqalik muddatni belgilaydi.
+
+    purpose: 'topup' yoki 'buy:<account_id>' (to'g'ridan-to'g'ri xarid).
+    """
     now = utcnow_iso()
+    expires_at = deadline_after(PAYMENT_MINUTES)
     await db.execute(
         "INSERT INTO hamyon_payments "
-        "(order_id, user_id, amount, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, 'pending', ?, ?)",
-        (order_id, user_id, amount, now, now),
+        "(order_id, user_id, amount, purpose, expires_at, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+        (order_id, user_id, amount, purpose, expires_at, now, now),
     )
+    return expires_at
+
+
+async def expire_stale_hamyon_payments() -> list[tuple[int, int]]:
+    """Muddati o'tgan pending to'lovlarni bekor qiladi (buyer tg_id, amount)."""
+    now = utcnow_iso()
+    rows = await db.fetchall(
+        "SELECT id, user_id, amount FROM hamyon_payments "
+        "WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?",
+        (now,),
+    )
+    events: list[tuple[int, int]] = []
+    for row in rows:
+        await db.execute(
+            "UPDATE hamyon_payments SET status = 'expired', updated_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (now, row["id"]),
+        )
+        user = await get_user(row["user_id"])
+        if user is not None:
+            events.append((int(user["tg_id"]), int(row["amount"])))
+    return events
 
 
 async def update_hamyon_payment_created(
@@ -862,7 +893,9 @@ async def complete_hamyon_payment(payment_id: str, amount: int):
             return None
 
         user = await _fetchone(
-            conn, "SELECT tg_id, balance FROM users WHERE id = ?", (payment["user_id"],)
+            conn,
+            "SELECT tg_id, balance, full_name, username FROM users WHERE id = ?",
+            (payment["user_id"],),
         )
         if user is None:
             return None
@@ -871,8 +904,12 @@ async def complete_hamyon_payment(payment_id: str, amount: int):
             return {
                 "credited": False,
                 "user_tg": int(user["tg_id"]),
+                "user_name": user["full_name"] or "",
+                "username": user["username"],
                 "amount": amount,
                 "balance": int(user["balance"]),
+                "payment_id": payment_id,
+                "purpose": str(payment["purpose"] or "topup"),
             }
 
         now = utcnow_iso()
@@ -896,8 +933,12 @@ async def complete_hamyon_payment(payment_id: str, amount: int):
         return {
             "credited": True,
             "user_tg": int(user["tg_id"]),
+            "user_name": user["full_name"] or "",
+            "username": user["username"],
             "amount": amount,
             "balance": int(updated["balance"]),
+            "payment_id": payment_id,
+            "purpose": str(payment["purpose"] or "topup"),
         }
 
 

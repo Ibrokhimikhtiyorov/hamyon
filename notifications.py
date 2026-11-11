@@ -3,8 +3,8 @@ import logging
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
 
-from config import ADMIN_IDS
-from utils import code, esc, fmt_dt, fmt_sum
+from config import ADMIN_IDS, CHECK_MINUTES
+from utils import code, esc, fmt_dt, fmt_sum, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,58 @@ async def notify_admins(bot: Bot, text: str, reply_markup: InlineKeyboardMarkup 
             await bot.send_message(admin_id, text, reply_markup=reply_markup)
         except Exception as exc:
             logger.warning("Adminga xabar yuborilmadi (%s): %s", admin_id, exc)
+
+
+async def notify_admin_payment_received(
+    bot: Bot,
+    *,
+    user_name: str,
+    username: str | None,
+    user_tg: int,
+    amount: int,
+    payment_id: str,
+    balance: int,
+    note: str,
+) -> None:
+    """Har bir muvaffaqiyatli to'lovda adminlarga SMS uslubida bildirishnoma."""
+    text = (
+        "📲 <b>SMS: To'lov qilindi!</b>\n\n"
+        f"📝 Turi: {esc(note)}\n"
+        f"👤 To'lovchi: {esc(user_name) or '-'} ({code(user_tg)})\n"
+        f"🔗 Username: @{esc(username or 'yo`q')}\n"
+        f"💰 Summa: <b>{fmt_sum(amount)}</b>\n"
+        f"🧾 To'lov ID: {code(payment_id)}\n"
+        f"👛 Yangi balans: <b>{fmt_sum(balance)}</b>\n"
+        f"🕐 Vaqt: {fmt_dt(utcnow_iso())}"
+    )
+    await notify_admins(bot, text)
+
+
+async def notify_admin_purchase(
+    bot: Bot,
+    *,
+    buyer_name: str,
+    buyer_tg: int,
+    account_id: int,
+    price: int,
+    order_id: int,
+    seller_name: str,
+    seller_code: str | None,
+    method: str,
+) -> None:
+    """Xaridor akkaunt sotib olganda adminlarga SMS uslubida bildirishnoma."""
+    text = (
+        "📲 <b>SMS: To'lov qilildi — akkaunt sotildi!</b>\n\n"
+        f"🧾 Buyurtma: <b>#{order_id}</b>\n"
+        f"📦 Akkaunt: #{account_id}\n"
+        f"👤 Xaridor: {esc(buyer_name)} ({code(buyer_tg)})\n"
+        f"🛍 Sotuvchi: {esc(seller_name)} ({code(seller_code or '-')})\n"
+        f"💰 To'langan summa: <b>{fmt_sum(price)}</b>\n"
+        f"💳 To'lov usuli: {esc(method)}\n"
+        f"⏰ Tekshirish muddati: {CHECK_MINUTES} daqiqa\n"
+        f"🕐 Vaqt: {fmt_dt(utcnow_iso())}"
+    )
+    await notify_admins(bot, text)
 
 
 async def send_topup_card(

@@ -92,15 +92,6 @@ def wallet_menu() -> InlineKeyboardMarkup:
     )
 
 
-def account_confirm(price: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [_btn("✅ Ha, akkaunt ishlaydi", "seller:addconfirm:yes")],
-            [_btn("❌ Bekor qilish", "nav:menu")],
-        ]
-    )
-
-
 def seller_accounts_kb(accounts) -> InlineKeyboardMarkup:
     rows = []
     for account in accounts:
@@ -150,9 +141,10 @@ def buyer_accounts_kb(accounts) -> InlineKeyboardMarkup:
 def account_offer_kb(account_id: int, balance: int, price: int) -> InlineKeyboardMarkup:
     rows = []
     if balance >= price:
-        rows.append([_btn("✅ Sotib olish", f"shop:confirm:{account_id}")])
+        rows.append([_btn("✅ Sotib olish (balansdan)", f"shop:confirm:{account_id}")])
     else:
         rows.append([_btn("➕ Balansni to'ldirish", "wallet:topup")])
+    rows.append([_btn("⚡ To'g'ridan-to'g'ri to'lash", f"shop:pay:{account_id}")])
     rows.append([_btn("🔙 Orqaga", "buyer:search")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

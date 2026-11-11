@@ -19,7 +19,7 @@ from handlers import admin, buyer, seller, start, wallet
 from handlers.common import error_handler
 from hamyon import hamyon_complete, hamyon_prepare
 from middlewares import ThrottlingMiddleware, UserMiddleware
-from scheduler import penalty_loop
+from scheduler import maintenance_loop
 from sqlite_storage import SQLiteStorage
 
 
@@ -106,7 +106,7 @@ async def main() -> None:
         except Exception as exc:
             logger.warning("Buyruqlarni o'rnatib bo'lmadi: %s", exc)
 
-        scheduler_task = asyncio.create_task(penalty_loop(bot))
+        scheduler_task = asyncio.create_task(maintenance_loop(bot))
 
         await bot.delete_webhook(drop_pending_updates=True)
 

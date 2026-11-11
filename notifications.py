@@ -3,6 +3,7 @@ import logging
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
 
+import services
 from config import ADMIN_IDS, CHECK_MINUTES
 from utils import code, esc, fmt_dt, fmt_sum, utcnow_iso
 
@@ -80,7 +81,9 @@ async def send_topup_card(
         f"💰 Summa: <b>{fmt_sum(topup['amount'])}</b>\n"
         f"🧾 To'lov turi: {esc(topup['receipt_type'])}\n"
         f"🕐 Vaqt: {fmt_dt(topup['created_at'])}\n\n"
-        f"So'rov ID: {code(topup['id'])}"
+        f"So'rov ID: {code(topup['id'])}\n\n"
+        "⚠️ <b>Firibgarlikdan ehtiyot bo'ling:</b> tasdiqlashdan oldin chekda "
+        "summa, vaqt va qarshi karta raqami to'g'riligini tekshiring."
     )
     try:
         if topup["receipt_type"] == "photo":
@@ -127,7 +130,7 @@ def withdrawal_text(withdrawal) -> str:
         f"🆔 Telegram ID: {code(withdrawal['user_tg'])}\n"
         f"🔑 Sotuvchi kodi: {code(withdrawal['seller_code'] or '-')}\n"
         f"💰 Summa: <b>{fmt_sum(withdrawal['amount'])}</b>\n"
-        f"💳 Karta: {code(withdrawal['card_number'])}\n"
+        f"💳 Karta: {code(services.reveal_card(withdrawal['card_number']))}\n"
         f"🕐 Vaqt: {fmt_dt(withdrawal['created_at'])}\n\n"
         f"So'rov ID: {code(withdrawal['id'])}"
     )

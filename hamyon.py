@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import time
 from typing import Any
 
 from aiohttp import ClientSession, ClientTimeout, web
@@ -24,6 +25,48 @@ from notifications import notify_admin_payment_received, notify_admin_purchase
 from utils import code, fmt_dt, fmt_sum
 
 logger = logging.getLogger(__name__)
+
+
+class _WebhookRateLimiter:
+    """Noto'g'ri imzo urinishlarini cheklaydi (imzo brute-force himoyasi).
+
+    Faqat RAD etilgan (403) so'rovlar hisoblanadi — to'g'ri imzoli
+    HamyonAPI callback'lari hech qachon bloklanmaydi.
+    """
+
+    def __init__(self, max_failures: int = 20, window_seconds: float = 60.0) -> None:
+        self.max_failures = max_failures
+        self.window = window_seconds
+        self._failures: dict[str, list[float]] = {}
+
+    @staticmethod
+    def client_ip(request: web.Request) -> str:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.remote or "unknown"
+
+    def is_blocked(self, ip: str) -> bool:
+        now = time.monotonic()
+        hits = [t for t in self._failures.get(ip, ()) if now - t < self.window]
+        self._failures[ip] = hits
+        return len(hits) >= self.max_failures
+
+    def register_failure(self, ip: str) -> None:
+        now = time.monotonic()
+        self._failures.setdefault(ip, []).append(now)
+        if len(self._failures) > 5000:
+            cutoff = now - self.window
+            self._failures = {
+                key: hits
+                for key, hits in (
+                    (k, [t for t in v if t >= cutoff]) for k, v in self._failures.items()
+                )
+                if hits
+            }
+
+
+_rate_limiter = _WebhookRateLimiter()
 
 
 def _signature_is_valid(form: Any) -> bool:
@@ -96,8 +139,12 @@ async def create_payment(order_id: str, amount: int) -> dict[str, Any]:
 
 
 async def hamyon_prepare(request: web.Request) -> web.Response:
+    ip = _rate_limiter.client_ip(request)
+    if _rate_limiter.is_blocked(ip):
+        return web.json_response({"error": "too_many_requests"}, status=429)
     form = await request.post()
     if not _signature_is_valid(form):
+        _rate_limiter.register_failure(ip)
         return web.json_response({"error": "imzo"}, status=403)
 
     order_id = str(form.get("order_id", "")).strip()
@@ -184,8 +231,12 @@ async def _finish_purchase(bot, payment: dict, account_id: int) -> bool:
 
 
 async def hamyon_complete(request: web.Request) -> web.Response:
+    ip = _rate_limiter.client_ip(request)
+    if _rate_limiter.is_blocked(ip):
+        return web.json_response({"error": "too_many_requests"}, status=429)
     form = await request.post()
     if not _signature_is_valid(form):
+        _rate_limiter.register_failure(ip)
         return web.json_response({"error": "imzo"}, status=403)
 
     payment_id = str(form.get("payment_id", "")).strip()

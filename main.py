@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 
 
 async def health(request):
@@ -39,7 +39,7 @@ async def health(request):
 
 
 async def start_web_server(bot: Bot):
-    app = web.Application()
+    app = web.Application(client_max_size=64 * 1024)
     app["bot"] = bot
     app.router.add_get("/", health)
     app.router.add_get("/health", health)

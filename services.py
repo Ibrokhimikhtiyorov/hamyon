@@ -592,52 +592,76 @@ async def accrue_penalties():
                         1, round(int(order["price"]) * PENALTY_PERCENT / 100)
                     )
                     extra = penalty_each * new_ticks
-                    await conn.execute(
-                        "UPDATE users SET balance = balance - ? WHERE id = ?",
-                        (extra, order["buyer_id"]),
-                    )
-                    await conn.execute(
-                        "UPDATE orders SET penalty = penalty + ?, penalty_ticks = ?, "
-                        "last_penalty_at = ? WHERE id = ?",
-                        (extra, ticks_due, utcnow_iso(), order["id"]),
-                    )
-                    await conn.execute(
-                        "INSERT INTO transactions "
-                        "(user_id, order_id, amount, type, description, created_at) "
-                        "VALUES (?, ?, ?, 'penalty', ?, ?)",
-                        (
-                            order["buyer_id"],
-                            order["id"],
-                            -extra,
-                            (f"Buyurtma #{order['id']} kechikish jarimasi "
-                            f"({PENALTY_PERCENT}% x {new_ticks})"),
-                            utcnow_iso(),
-                        ),
-                    )
-
-                    buyer = await _fetchone(
+                    # Xavfsizlik: jarima faqat xaridorning real balansidagi
+                    # mablag' hisobidan yechiladi — balans minusga tushmaydi
+                    # va platforma yig'ilmagan jarimani to'lamaydi.
+                    buyer_row = await _fetchone(
                         conn,
-                        "SELECT tg_id FROM users WHERE id = ?",
+                        "SELECT balance FROM users WHERE id = ?",
                         (order["buyer_id"],),
                     )
-                    order = await _fetchone(
-                        conn, "SELECT * FROM orders WHERE id = ?", (order["id"],)
+                    available = (
+                        max(int(buyer_row["balance"]), 0)
+                        if buyer_row is not None
+                        else 0
                     )
-                    if buyer:
-                        total = int(order["price"]) + int(order["penalty"])
-                        events.append(
+                    if extra > available:
+                        extra = available
+                    if extra > 0:
+                        await conn.execute(
+                            "UPDATE users SET balance = balance - ? "
+                            "WHERE id = ? AND balance >= ?",
+                            (extra, order["buyer_id"], extra),
+                        )
+                        await conn.execute(
+                            "UPDATE orders SET penalty = penalty + ?, penalty_ticks = ?, "
+                            "last_penalty_at = ? WHERE id = ?",
+                            (extra, ticks_due, utcnow_iso(), order["id"]),
+                        )
+                        await conn.execute(
+                            "INSERT INTO transactions "
+                            "(user_id, order_id, amount, type, description, created_at) "
+                            "VALUES (?, ?, ?, 'penalty', ?, ?)",
                             (
-                                buyer["tg_id"],
-                                ("⏰ <b>Tekshirish muddati tugadi!</b>\n\n"
-                                f"Buyurtma: <b>#{order['id']}</b>\n"
-                                f"Har bir {PENALTY_INTERVAL_MINUTES} daqiqa kechikish uchun "
-                                f"narxning {PENALTY_PERCENT}% qo'shimcha haq hisoblanadi.\n\n"
-                                f"Qo'shilgan jarima: <b>{fmt_sum(extra)}</b>\n"
-                                f"Joriy jarima: <b>{fmt_sum(order['penalty'])}</b>\n"
-                                f"Umumiy summa: <b>{fmt_sum(total)}</b>\n\n"
-                                "Akkauntni tekshirib bo'lsangiz, «Tasdiqlash» tugmasini bosing."),
+                                order["buyer_id"],
                                 order["id"],
+                                -extra,
+                                (f"Buyurtma #{order['id']} kechikish jarimasi "
+                                f"({PENALTY_PERCENT}% x {new_ticks})"),
+                                utcnow_iso(),
+                            ),
+                        )
+
+                        buyer = await _fetchone(
+                            conn,
+                            "SELECT tg_id FROM users WHERE id = ?",
+                            (order["buyer_id"],),
+                        )
+                        order = await _fetchone(
+                            conn, "SELECT * FROM orders WHERE id = ?", (order["id"],)
+                        )
+                        if buyer:
+                            total = int(order["price"]) + int(order["penalty"])
+                            events.append(
+                                (
+                                    buyer["tg_id"],
+                                    ("⏰ <b>Tekshirish muddati tugadi!</b>\n\n"
+                                    f"Buyurtma: <b>#{order['id']}</b>\n"
+                                    f"Har bir {PENALTY_INTERVAL_MINUTES} daqiqa kechikish uchun "
+                                    f"narxning {PENALTY_PERCENT}% qo'shimcha haq hisoblanadi.\n\n"
+                                    f"Qo'shilgan jarima: <b>{fmt_sum(extra)}</b>\n"
+                                    f"Joriy jarima: <b>{fmt_sum(order['penalty'])}</b>\n"
+                                    f"Umumiy summa: <b>{fmt_sum(total)}</b>\n\n"
+                                    "Akkauntni tekshirib bo'lsangiz, «Tasdiqlash» tugmasini bosing."),
+                                    order["id"],
+                                )
                             )
+                    else:
+                        # Balansda mablag' yo'q — jarima to'planmaydi,
+                        # faqat hisoblangan ticklar belgilanadi.
+                        await conn.execute(
+                            "UPDATE orders SET penalty_ticks = ? WHERE id = ?",
+                            (ticks_due, order["id"]),
                         )
 
             if now >= auto_at:
@@ -1015,6 +1039,17 @@ async def list_pending_topups(limit: int = 10):
     )
 
 
+def reveal_card(value: str) -> str:
+    """Bazadagi shifrlangan karta raqamini ochadi.
+
+    Eski (shifrlanmagan) yozuvlar uchun qiymat o'zgarishsiz qaytadi.
+    """
+    try:
+        return crypto.decrypt(value)
+    except ValueError:
+        return value
+
+
 async def create_withdrawal(user_id: int, amount: int, card_number: str):
     async with db.transaction() as conn:
         user = await _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
@@ -1040,7 +1075,7 @@ async def create_withdrawal(user_id: int, amount: int, card_number: str):
             "INSERT INTO withdrawals "
             "(user_id, amount, card_number, status, created_at) "
             "VALUES (?, ?, ?, 'pending', ?)",
-            (user_id, amount, card_number, utcnow_iso()),
+            (user_id, amount, crypto.encrypt(card_number), utcnow_iso()),
         )
         withdrawal_id = int(cursor.lastrowid or 0)
         await cursor.close()
@@ -1095,7 +1130,7 @@ async def review_withdrawal(withdrawal_id: int, approve: bool, admin_tg_id: int)
             "id": withdrawal_id,
             "approved": approve,
             "amount": int(withdrawal["amount"]),
-            "card_number": withdrawal["card_number"],
+            "card_number": reveal_card(withdrawal["card_number"]),
             "user_tg": user["tg_id"] if user else None,
             "user_name": user["full_name"] if user else "",
         }

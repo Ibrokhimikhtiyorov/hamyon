@@ -31,8 +31,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+APP_VERSION = "2.0.0"
+
+
 async def health(request):
-    return web.Response(text="Telegram bot is running!")
+    return web.json_response({"status": "ok", "version": APP_VERSION})
 
 
 async def start_web_server(bot: Bot):
